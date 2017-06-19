@@ -1,5 +1,8 @@
+import os
+
 import hug
-from twil
+from twilio.rest import Client as TwilioClient
 
 
-twilio_client = 
+twilio_client = TwilioClient(os.getenv('TWILIO_SID'), os.getenv('TWILIO_TOKEN'))
+
