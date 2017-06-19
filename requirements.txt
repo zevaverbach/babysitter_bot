@@ -6,6 +6,8 @@ chardet==3.0.4
 cryptography==1.9
 decorator==4.0.11
 falcon==1.2.0
+google-api-python-client==1.6.2
+httplib2==0.10.3
 hug==2.3.0
 idna==2.5
 ipython==6.1.0
@@ -16,6 +18,7 @@ pexpect==4.2.1
 pickleshare==0.7.4
 prompt-toolkit==1.0.14
 ptyprocess==0.5.1
+pyasn1==0.2.3
 pyasn1-modules==0.0.9
 pycparser==2.17
 Pygments==2.2.0
@@ -25,9 +28,11 @@ PySocks==1.6.7
 python-mimeparse==1.6.0
 pytz==2017.2
 requests==2.18.1
+rsa==3.4.2
 simplegeneric==0.8.1
 six==1.10.0
 traitlets==4.3.2
 twilio==6.4.1
+uritemplate==3.0.0
 urllib3==1.21.1
 wcwidth==0.1.7
