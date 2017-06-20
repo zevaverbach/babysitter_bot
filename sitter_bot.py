@@ -1,8 +1,9 @@
 import datetime
 import os
+import re
 from typing import Optional
 
-import hug
+from flask import request, Flask
 from twilio.rest import Client as TwilioClient
 from twilio.twiml.messaging_response import MessagingResponse
 
@@ -13,6 +14,9 @@ my_cell = os.getenv('MY_CELL')
 booker_num = os.getenv('MY_TWILIO_NUM')
 timeout_minutes = 120
 sitters = {}
+
+app = Flask(__name__)
+app.config.from_object(__name__)
 
 
 class CouldntParse(Exception):
@@ -28,30 +32,41 @@ def say_hi_ask_for_sitters():
     twilio_client.api.account.messages.create(to=my_cell, from_=booker_num, body=message)
 
 
-@hug.post('/')
-def booker(incoming_message: str) -> str:
-    from_num = incoming_message['From']
-    print(vars(incoming_message))
+@app.route('/booker', methods=['POST'])
+def booker() -> str:
+    from_ = request.values.get('From')
+    body = request.values.get('Body')
+    message = None
 
-    if from_num not in list(sitters.values()) + [my_cell]:
-        # unknown number
-        return
-
-    in_message = incoming_message['Body']
-
-    if from_num == my_cell:
-        if has_phone_num(in_message):
+    if from_ == my_cell:
+        # from me
+        if has_phone_num(body):
             try:
-                add_sitter(in_message)
+                add_sitter(body)
             except CouldntParse:
-                response = 'Sorry, did you mean to add a sitter?  Please try again.'
+                message = 'Sorry, did you mean to add a sitter?  Please try again.'
         else:
             try:
-                book_sitter(in_message)
+                book_sitter(body)
             except CouldntParse:
-                response = 'Sorry, did you mean to book a sitter?  Please try again.'
+                message = 'Sorry, did you mean to book a sitter?  Please try again.'
             except NoneAvailable:
-                response = f'Darn, I wasn\'t able to book a sitter.  I waited {timeout_minutes} minutes.'
+                message = f'Darn, I wasn\'t able to book a sitter.  I waited {timeout_minutes} minutes.'
+
+    elif from_ in sitter.values():
+        if body.strip().lower() == 'yes':
+
+    if message is None:
+        message = 'I wasn\'t sure what to do with your input. Try again?'
+
+    resp = MessagingResponse()
+    resp.message(message)
+
+    return str(resp)
+
+
+def has_phone_num(string):
+    return bool(re.match('\+[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]', string))
 
 
 def syndicate_and_book(session_start: datetime.datetime, session_end: datetime.datetime) -> Optional[str]:
@@ -76,6 +91,14 @@ def add_sitter(in_message: str):
         sitters[name] = num
 
 
+def parse_sitter_info(string):
+    pass
+
+
+def parse_sitter_request(string):
+    pass
+
+
 if __name__ == '__main__':
     say_hi_ask_for_sitters()
-    hug.API(__name__).http.serve()
+    app.run(debug=True, port=8000)
