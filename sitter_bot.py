@@ -1,25 +1,37 @@
 import datetime
 import os
-import re
-from typing import Optional
+from typing import Optional, Tuple
 
+import pickle
 from flask import request, Flask
 from twilio.rest import Client as TwilioClient
 from twilio.twiml.messaging_response import MessagingResponse
 
-
 twilio_client = TwilioClient(os.getenv('TWILIO_SID'), os.getenv('TWILIO_TOKEN'))
 
-my_cell = os.getenv('MY_CELL')
-booker_num = os.getenv('MY_TWILIO_NUM')
-timeout_minutes = 120
+MY_CELL = os.getenv('MY_CELL')
+BOOKER_NUM = os.getenv('MY_TWILIO_NUM')
+COUNTRY_CODE = f'+{os.getenv("TWILIO_COUNTRY_CODE")}'
+TIMEOUT_MINUTES = 120
+
 sitters = {}
+if os.path.exists('sitters.p'):
+    sitters = pickle.load(open('sitters.p', 'rb'))
+
+bookings = {}
+if os.path.exists('bookings.p'):
+    bookings = pickle.load(open('bookings.p', 'rb'))
+
+help_add = 'You can add a sitter by giving me their first name and 10-digit phone number'
+help_text = help_add + ', or book a sitter by ' \
+            'specifying a date and time.  You can also remove a sitter from the list ' \
+            'with "delete" or "remove" and then their first name.'
 
 app = Flask(__name__)
 app.config.from_object(__name__)
 
 
-class CouldntParse(Exception):
+class AlreadyExists(Exception):
     pass
 
 
@@ -28,45 +40,67 @@ class NoneAvailable(Exception):
 
 
 def say_hi_ask_for_sitters():
-    message = "Hey, can you tell me your sitters' info one at a time?"
-    twilio_client.api.account.messages.create(to=my_cell, from_=booker_num, body=message)
+    message = "Hey, can you tell me your sitters' info one at a time? " \
+              "First name then phone num. By the way, if you need help, type 'halp' at any time"
+    twilio_client.api.account.messages.create(to=MY_CELL, from_=BOOKER_NUM, body=message)
 
 
-@app.route('/booker', methods=['POST'])
-def booker() -> str:
+@app.route('/bot', methods=['POST'])
+def bot() -> str:
     from_ = request.values.get('From')
-    body = request.values.get('Body')
-    message = None
-
-    if from_ == my_cell:
-        # from me
-        if has_phone_num(body):
-            try:
-                add_sitter(body)
-            except CouldntParse:
-                message = 'Sorry, did you mean to add a sitter?  Please try again.'
-        else:
-            try:
-                book_sitter(body)
-            except CouldntParse:
-                message = 'Sorry, did you mean to book a sitter?  Please try again.'
-            except NoneAvailable:
-                message = f'Darn, I wasn\'t able to book a sitter.  I waited {timeout_minutes} minutes.'
-
-    elif from_ in sitter.values():
-        if body.strip().lower() == 'yes':
-
-    if message is None:
-        message = 'I wasn\'t sure what to do with your input. Try again?'
+    body = request.values.get('Body').lower()
 
     resp = MessagingResponse()
-    resp.message(message)
+    response = None
+
+    if not from_ == MY_CELL:
+        return str(resp.message(''))
+
+    if 'halp' in body:
+        if not sitters:
+            response = f'You don\'t have any sitters yet. {help_add}.'
+        else:
+            sitter_list = 'Your sitters are ' + ', '.join(
+                f'{sitter_name.title()}' for sitter_name in sitters) + '.'
+            response = f'{sitter_list} {help_text}'
+
+    elif has_phone_num(body):
+
+        try:
+            sitter_name, sitter_num = add_sitter(body)
+        except (AssertionError, ValueError):
+            response = 'Sorry, did you mean to add a sitter?  Please try again.'
+        except AlreadyExists as e:
+            sitter_name = e.args[0]
+            response = f'{sitter_name.title()} already exists!'
+        else:
+            response = f'Okay, I added {sitter_name.title()} to sitters, with phone # {sitter_num}.  '
+
+    elif any(remove_word in body for remove_word in ['remove', 'delete']):
+
+        try:
+            sitter_name = remove_sitter(body)
+        except KeyError:
+            response = 'No such sitter. Please write "delete [sitter\'s first name]."'
+        else:
+            response = f'Okay, I removed {sitter_name.title()} from the sitters.'
+
+    else:
+        try:
+            book_sitter(body)
+        except (AssertionError, ValueError):
+            response = 'Sorry, did you mean to book a sitter?  Please try again.'
+
+    if response is None:
+        response = 'I wasn\'t sure what to do with your input. ' + help_text
+
+    resp.message(response)
 
     return str(resp)
 
 
 def has_phone_num(string):
-    return bool(re.match('\+[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]', string))
+    return len([char for char in string if char.isnumeric()]) >= 10
 
 
 def syndicate_and_book(session_start: datetime.datetime, session_end: datetime.datetime) -> Optional[str]:
@@ -82,23 +116,41 @@ def book_sitter(in_message: str) -> Optional[str]:
     syndicate_and_book(session_start, session_end)
 
 
-def add_sitter(in_message: str):
-    try:
-        name, num = parse_sitter_info(in_message)
-    except CouldntParse:
-        raise
-    else:
-        sitters[name] = num
+def add_sitter(in_message: str) -> Tuple[str, str]:
+    name, *num_parts = in_message.split(' ')
+
+    num_only = ''.join(char
+                       for num in num_parts
+                       for char in num if char.isnumeric())
+
+    lowercase_name = name.lower()
+    sitter = sitters.get(lowercase_name)
+
+    if sitter is not None:
+        raise AlreadyExists(lowercase_name)
+
+    assert len(num_only) == 10
+
+    sitters[lowercase_name] = f'{COUNTRY_CODE}num_only'
+    persist_sitters()
+    return name, sitters[lowercase_name]
 
 
-def parse_sitter_info(string):
-    pass
+def remove_sitter(body: str) -> str:
+    sitter_first_name = body.split(' ')[1]
+    sitter = sitters.get(sitter_first_name)
+    if sitter is None:
+        raise KeyError
+    del sitters[sitter_first_name]
+    persist_sitters()
+    return sitter_first_name
 
 
-def parse_sitter_request(string):
-    pass
+def persist_sitters():
+    pickle.dump(sitters, open('sitters.p', 'wb'))
 
 
 if __name__ == '__main__':
-    say_hi_ask_for_sitters()
-    app.run(debug=True, port=8000)
+    if not sitters:
+        say_hi_ask_for_sitters()
+    app.run(debug=True, port=4567)
