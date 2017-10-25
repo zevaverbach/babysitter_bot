@@ -31,10 +31,6 @@ app = Flask(__name__)
 app.config.from_object(__name__)
 
 
-class AlreadyExists(Exception):
-    pass
-
-
 class NoneAvailable(Exception):
     pass
 
@@ -70,9 +66,6 @@ def bot() -> str:
             sitter_name, sitter_num = add_sitter(body)
         except (AssertionError, ValueError):
             response = 'Sorry, did you mean to add a sitter?  Please try again.'
-        except AlreadyExists as e:
-            sitter_name = e.args[0]
-            response = f'{sitter_name.title()} already exists!'
         else:
             response = f'Okay, I added {sitter_name.title()} to sitters, with phone # {sitter_num}.  '
 
@@ -124,10 +117,6 @@ def add_sitter(body: str) -> Tuple[str, str]:
                        for char in num if char.isnumeric())
 
     lowercase_name = name.lower()
-    sitter = sitters.get(lowercase_name)
-
-    if sitter is not None:
-        raise AlreadyExists(lowercase_name)
 
     assert len(num_only) == 10
 
