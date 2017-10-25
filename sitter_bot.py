@@ -60,7 +60,7 @@ def bot() -> str:
         if not sitters:
             response = f'You don\'t have any sitters yet. {help_add}.'
         else:
-            sitter_list = 'Your sitters are ' + ', '.join(
+            sitter_list = 'Your sitters are ' + ' and '.join(
                 f'{sitter_name.title()}' for sitter_name in sitters) + '.'
             response = f'{sitter_list} {help_text}'
 
@@ -100,7 +100,7 @@ def bot() -> str:
 
 
 def has_phone_num(string):
-    return len([char for char in string if char.isnumeric()]) >= 10
+    return len([char for char in string if char.isnumeric()]) == 10
 
 
 def syndicate_and_book(session_start: datetime.datetime, session_end: datetime.datetime) -> Optional[str]:
@@ -111,13 +111,13 @@ def syndicate_and_book(session_start: datetime.datetime, session_end: datetime.d
     pass
 
 
-def book_sitter(in_message: str) -> Optional[str]:
-    session_start, session_end = parse_sitter_request(in_message)
+def book_sitter(body: str) -> Optional[str]:
+    session_start, session_end = parse_sitter_request(body)
     syndicate_and_book(session_start, session_end)
 
 
-def add_sitter(in_message: str) -> Tuple[str, str]:
-    name, *num_parts = in_message.split(' ')
+def add_sitter(body: str) -> Tuple[str, str]:
+    name, *num_parts = body.split(' ')
 
     num_only = ''.join(char
                        for num in num_parts
