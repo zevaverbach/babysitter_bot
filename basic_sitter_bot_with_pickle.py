@@ -34,6 +34,15 @@ def bot():
             response = f'Okay, I added {sitter_name.title()} to sitters, with phone # {sitter_num}.  '
             print(sitters)
 
+    elif any(remove_word in body for remove_word in ['remove', 'delete']):
+
+        try:
+            sitter_name = remove_sitter(body)
+        except KeyError:
+            response = 'No such sitter. Please write "delete [sitter\'s first name]."'
+        else:
+            response = f'Okay, I removed {sitter_name.title()} from the sitters.'
+
     resp = MessagingResponse()
     resp.message(response)
     return str(resp)
@@ -55,10 +64,22 @@ def add_sitter(body: str) -> Tuple[str, str]:
 
     assert len(num_only) == 10
 
-    sitters[lowercase_name] = f'+1{num_only}'
+    phone_number = f'+1{num_only}'
+    sitters[lowercase_name] = {'num':  phone_number,
+                               'name': lowercase_name}
     persist_sitters()
 
-    return name, sitters[lowercase_name]
+    return name, phone_number
+
+
+def remove_sitter(body: str) -> str:
+    sitter_first_name = body.split(' ')[1]
+    sitter = sitters.get(sitter_first_name)
+    if sitter is None:
+        raise KeyError
+    del sitters[sitter_first_name]
+    persist_sitters()
+    return sitter_first_name
 
 
 def persist_sitters():
