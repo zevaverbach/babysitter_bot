@@ -11,12 +11,12 @@ BOOKER_NUM = os.getenv('MY_TWILIO_NUM')
 
 twilio_client = TwilioClient(os.getenv('TWILIO_SID'), os.getenv('TWILIO_TOKEN'))
 
-app = Flask(__name__)
-app.config.from_object(__name__)
-
 sitters = {}
 if os.path.exists('sitters.p'):
     sitters = pickle.load(open('sitters.p', 'rb'))
+
+app = Flask(__name__)
+app.config.from_object(__name__)
 
 @app.route('/bot', methods=['POST'])
 def bot():
@@ -91,5 +91,5 @@ if __name__ == '__main__':
         sitter_list = 'Your sitters are ' + ' and '.join(
             f'{sitter_name.title()}' for sitter_name in sitters) + '.'
         twilio_client.api.account.messages.create(to=MY_CELL, from_=BOOKER_NUM, body=sitter_list)
-    app.run(debug=True, port=8000)
-
+        print(sitter_list)
+    app.run(debug=True, port=8000, use_reloader=False)

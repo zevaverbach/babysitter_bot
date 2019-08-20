@@ -49,11 +49,13 @@ def add_sitter(body: str) -> Tuple[str, str]:
 
     assert len(num_only) == 10
 
-    sitters[lowercase_name] = f'+1{num_only}'
+    phone_number = f'+1{num_only}'
+    sitters[lowercase_name] = {'num':  phone_number,
+                               'name': lowercase_name}
 
-    return name, sitters[lowercase_name]
+    return name, phone_number
 
 
 if __name__ == '__main__':
-    app.run(debug=True, port=8000)
+    app.run(debug=True, port=8000, use_reloader=False)
 

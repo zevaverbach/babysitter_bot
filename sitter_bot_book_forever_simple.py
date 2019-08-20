@@ -1,6 +1,7 @@
 import datetime
 from multiprocessing import Process
 import os
+from pprint import pprint
 import time
 from typing import Tuple, Dict
 
@@ -27,6 +28,10 @@ app = Flask(__name__)
 app.config.from_object(__name__)
 
 cal = pdt.Calendar()
+
+
+class TheresAlreadyAnActiveBooking(Exception):
+    pass
 
 
 def load_from_pickle(var_name: str) -> dict:
@@ -73,6 +78,8 @@ def bot() -> str:
                 start_datetime, end_time = request_booking(body)
             except ValueError:
                 response = 'Please specify an end time (e.g. "tomorrow 5pm to 10pm").'
+            except TheresAlreadyAnActiveBooking:
+                response = 'Please wait until the current booking is either booked or expires.'
             else:
                 booking_string = make_booking_string(start_datetime, end_time)
                 response = f'Okay, I will reach out to the sitters about sitting on {booking_string}.'
@@ -96,6 +103,7 @@ def accept_or_decline(sitter_name: str, body: str) -> str:
 
     global bookings
     global sitters
+
     bookings, sitters = load_from_pickle('bookings'), load_from_pickle('sitters')
     sitter = sitters[sitter_name]
 
@@ -103,66 +111,35 @@ def accept_or_decline(sitter_name: str, body: str) -> str:
                      if sitter_name in v['offered']
                      if v['offered'][sitter_name] not in ['yes', 'no']]
 
-    if body not in ['yes', 'no', 'n', 'y'] and not body.isnumeric():
-        return f'Hm, I\'m not sure what you meant, {sitter_name.title()}. Please write "yes", "no", ' \
-               f'or a number (if there are any pending bookings).'
-
-    action = None
-
-    if not body.isnumeric():
-        action = 'accept' if body in ['yes', 'y'] else 'decline'
-
     if len(sitter_offers) == 0:
-        return f'Sorry, {sitter_name.title()}, it looks like either that gig ' \
-               f'is already booked or there aren\'t any pending gigs.'
+        update_client(f'there\'s more than one booking on offer, so I\'m confused!')
+        return f'Sorry, {sitter_name.title()}, there are no pending gigs.'
 
-    elif len(sitter_offers) == 1:
-        offer = sitter_offers[0]
+    elif len(sitter_offers) > 1:
+        return f'I\'m not sure which offer you\'re responding to!'
 
-    else:
-        sitter_offers_string = ", ".join([f'{idx + 1}) {make_booking_string(*sitter_offer)}'
-                                          for idx, sitter_offer in enumerate(sitter_offers)])
+    offer = sitter_offers[0]
+    booking = bookings[offer]
 
-        if body.isnumeric():
-            try:
-                offer = sitter_offers[int(body) - 1]
-            except IndexError:
-                action = sitter['next action']
-                return f'Sorry, which booking did you want to {action}? {sitter_offers_string}'
-        else:
-            sitter['next action'] = action
-            persist_sitters()
-            return f'Sorry, which booking did you want to {action}? {sitter_offers_string}'
+    if body not in ['yes', 'no', 'n', 'y']:
+        return f'Hm, I\'m not sure what you meant, {sitter_name.title()}. Please write "yes" or "no".'
 
-    try:
-        action = action or sitter.pop('next action')
-    except KeyError:
-        raise KeyError(f'no next action, and sitter_offers is {sitter_offers}, so offer is {offer}.')
-    booking_string = make_booking_string(*offer)
+    if body in ['yes', 'y']:
 
-    if action == 'accept':
+        booking_string = make_booking_string(*offer)
 
-        if not bookings.get(offer):
+        if any(booking['offered'][sitter_] == 'yes'
+               for sitter_ in booking['offered'].keys()):
             return f'Sorry, {sitter_name.title()}, it looks like {booking_string} is already booked.'
 
-        if any(bookings[offer]['offered'][sitter_] == 'yes'
-               for sitter_ in bookings[offer]['offered'].keys()):
-            if bookings[offer]['offered'][sitter_name] == 'yes':
-                return f'You already accepted {booking_string}, {sitter_name.title()}!'
-            return f'Sorry, {sitter_name.title()}, it looks like {booking_string} is already booked.'
-
-        bookings[offer]['offered'][sitter_name] = 'yes'
+        booking['offered'][sitter_name] = 'yes'
         persist_bookings()
         update_client(f'{sitter_name.title()} agreed to babysit on {booking_string}!')
         return f'Awesome, {sitter_name.title()}!  See you on {booking_string}.'
 
-    else:
-        if bookings[offer]['offered'][sitter_name] == 'yes':
-            return f'You already accepted {booking_string}, {sitter_name.title()}!'
-
-        bookings[offer]['offered'][sitter_name] = 'no'
-        persist_bookings()
-        return f'Okay, no problem, {sitter_name.title()}!  Next time.'
+    booking['offered'][sitter_name] = 'no'
+    persist_bookings()
+    return f'Okay, no problem, {sitter_name.title()}!  Next time.'
 
 
 def make_booking_string(start_datetime: datetime.datetime, end_time: datetime.time) -> str:
@@ -176,9 +153,7 @@ def book_forever():
 
         sitters_, bookings_ = load_from_pickle('sitters'), load_from_pickle('bookings')
 
-        if bookings_:
-
-            bookings_keys_to_delete = []
+        if sitters_ and bookings_:
 
             for booking_start_and_end, offered_dict in bookings_.items():
 
@@ -188,44 +163,19 @@ def book_forever():
                 if any(v == 'yes' for k, v in offers.items()):
                     continue
 
-                sitter_to_offer_name = None
+                if len(sitters_) == len(offers):
+                    continue
+
                 booking_string = make_booking_string(*booking_start_and_end)
 
-                if len(offers) == 0:
-                    first_sitter_name = list(sitters_)[0]
-                    sitter_to_offer_name = first_sitter_name
-                else:
-                    last_offer_was_minutes_ago = 0
-                    offers_without_a_no = {k: v for k, v in offers.items() if v != 'no'}
-                    if len(offers_without_a_no) > 0:
-                        last_offer: datetime.datetime = max(offers_without_a_no.values())
-                        last_offer_was_minutes_ago \
-                            = (datetime.datetime.now() - last_offer).total_seconds() / 60
+                for sitter_name, sitter_dict in sitters_.items():
+                    if sitter_name not in offers:
+                        offer_booking(sitter_dict, booking_string)
+                        offers[sitter_name] = datetime.datetime.now()
+                        update_client(
+                            f'Okay, I offered {booking_string} to {sitter_name.title()}.')
 
-                    if len(offers_without_a_no) == 0 or last_offer_was_minutes_ago > 1:
-                    # if len(offers_without_a_no) == 0 or last_offer_was_minutes_ago > 60:
-
-                        # if len(sitters_) == len(offers):
-                        #     bookings_keys_to_delete.append(booking_start_and_end)
-                        #     update_client(
-                        #         f'No babysitters are available for {booking_string}! Deleting request.')
-
-                        # else:
-                        for sitter in sitters_:
-                            if sitter not in offers:
-                                sitter_to_offer_name = sitter
-                                break
-
-                if sitter_to_offer_name is not None:
-                    sitter_to_offer = sitters_[sitter_to_offer_name]
-                    offer_booking(sitter_to_offer, booking_string)
-                    offers[sitter_to_offer_name] = datetime.datetime.now()
-                    update_client(
-                        f'Okay, I offered {booking_string} to {sitter_to_offer_name.title()}.')
-
-            if len(bookings_keys_to_delete) > 0:
-                for k in bookings_keys_to_delete:
-                    del bookings_[k]
+                pprint(bookings_)
 
             persist_bookings(bookings_)
 
@@ -239,7 +189,6 @@ def offer_booking(sitter_dict: dict, booking_string: str) -> None:
                                               from_=BOT_NUM,
                                               body=message)
 
-
 def update_client(string: str) -> None:
     twilio_client.api.account.messages.create(to=MY_CELL, from_=BOT_NUM, body=string)
 
@@ -252,6 +201,8 @@ def request_booking(body: str) -> Tuple[datetime.datetime, datetime.time]:
     session_start_datetime, session_end_time = parse_booking_request(body)
     global bookings
     bookings = load_from_pickle('bookings')
+    if bookings:
+        raise TheresAlreadyAnActiveBooking
     bookings[(session_start_datetime, session_end_time)] = {'offered': dict()}
     persist_bookings()
     return session_start_datetime, session_end_time
@@ -304,6 +255,8 @@ def persist_bookings(bookings_: dict = None):
 if __name__ == '__main__':
     update_client('Hi, this is Babysitter Bot, on the job!  Send me a date with time range and '
                   'I\'ll try to book one of our sitters!')
+    if not sitters:
+        update_client('Please add at least one babysitter.')
     p = Process(target=book_forever)
     p.start()
     app.run(debug=True, port=8000, use_reloader=False)
